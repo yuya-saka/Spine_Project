@@ -27,4 +27,8 @@ debugs/
 *.nii
 *.nii.gz
 *.json
+*.log
+*.pth
+*.yaml
+
 
