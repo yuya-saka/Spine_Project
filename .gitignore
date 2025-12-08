@@ -1,0 +1,30 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# 無視するファイル、フォルダ
+data/
+nifti_output/
+nifti_out_past/
+segmentations/
+segmentations_past/
+fracture_labels/
+spine_data/
+spine_data_exp/
+debugs/
+
+
+# 無視するもの
+*.python-version
+*.dcm
+*.nii
+*.nii.gz
+*.json
+

@@ -1,0 +1,52 @@
+ID,DicomPath,FractureStart,FractureEnd,Note,num_fixed,Details,Exclude,TotalSlices
+sample1,data/sample1/dicom/,433,479,Top to Bottom,Original,Normal,False,762
+sample2,data/sample2/dicom/,106,127,Top to Bottom,Original,Tilted left,False,280
+sample3,data/sample3/dicom/,440,569,Bottom to Top,Original,Tilted right,False,840
+sample4,data/sample4/dicom/,476,507,Bottom to Top,Original,Normal,False,780
+sample5,data/sample5/dicom/,471,512,Bottom to Top,Suspicious,Tilted right; High probability of error,False,705
+sample6,data/sample6/dicom/,,,Unknown,N/A,Normal (No fracture),True,
+sample7,data/sample7/dicom/,464,557,Top to Bottom,Original,Includes second range 642-721,False,1012
+sample9,data/sample9/dicom/,,,Bottom to Top,Mismatch,Slice count mismatch,True,
+sample10,data/sample10/dicom/,622,689,Top to Bottom,Original,Normal,False,950
+sample12,data/sample12/dicom/,642,714,Top to Bottom,Original,Tilted right but vertebrae okay,False,912
+sample13,data/sample13/dicom/,,,Bottom to Top,Mismatch,Slice count mismatch,True,
+sample15,data/sample15/dicom/,495,495,Bottom to Top,Mismatch,Slice count mismatch,True,
+sample15.2,data/sample15.2/dicom/,657,727,Top to Bottom,Original,Normal,False,915
+sample17,data/sample17/dicom/,445,527,Bottom to Top,Original,Normal,False,727
+sample19,data/sample19/dicom/,388,516,Bottom to Top,Suspicious,High probability of error,False,705
+sample21,data/sample21/dicom/,586,626,Top to Bottom,Original,Tilted right but vertebrae okay,False,945
+sample22,data/sample22/dicom/,330,424,Bottom to Top,Suspicious,High probability of error,False,505
+sample23,data/sample23/dicom/,243,345,Bottom to Top,Original,Normal,False,725
+sample24,data/sample24/dicom/,1058,1096,Bottom to Top,Suspicious,Tilted left; High probability of error,False,1215
+sample25,data/sample25/dicom/,287,397,Bottom to Top,Original,Normal,False,840
+sample27,data/sample27/dicom/,261,373,Bottom to Top,Original,Tilted left but vertebrae okay,False,820
+sample28,data/sample28/dicom/,238,362,Top to Bottom,Original,Normal,False,855
+sample29,data/sample29/dicom/,102,225,Bottom to Top,Suspicious,High probability of error,False,550
+sample31,data/sample31/dicom/,273,363,Bottom to Top,Suspicious,Tilted right; High probability of error,False,750
+sample32,data/sample32/dicom/,231,435,Bottom to Top,Suspicious,High probability of error,False,565
+sample33,data/sample33/dicom/,,,Bottom to Top,Error,Too hard to see; High probability of error,True,650
+sample34,data/sample34/dicom/,,,Bottom to Top,Error,No slice numbers,True,802
+sample35,data/sample35/dicom/,268,330,Bottom to Top,Original,Tilted right but vertebrae okay,False,937
+sample36,data/sample36/dicom/,"936-965; 1030-1086",,Bottom to Top,Suspicious,Tilted left; High probability of error; Multiple ranges,False,1287
+sample37,data/sample37/dicom/,260,405,Bottom to Top,Suspicious,Tilted right; High probability of error,False,1057
+sample38,data/sample38/dicom/,455,533,Bottom to Top,Suspicious,High probability of error,False,885
+sample41,data/sample41/dicom/,203,289,Bottom to Top,Suspicious,High probability of error,False,887
+sample42,data/sample42/dicom/,282,355,Bottom to Top,Original,Normal,False,834
+sample43,data/sample43/dicom/,325,456,Bottom to Top,Suspicious,High probability of error,False,862
+sample44,data/sample44/dicom/,379,470,Bottom to Top,Suspicious,Tilted right; High probability of error,False,900
+sample47,data/sample47/dicom/,398,618,Bottom to Top,Original,Tilted right,False,990
+sample48,data/sample48/dicom/,,,Bottom to Top,Error,Tilted right; Slice number mismatch,True,832
+sample50,data/sample50/dicom/,,,Bottom to Top,Error,Tilted right; Mismatch; Few slices,True,104
+sample51,data/sample51/dicom/,376,473,Bottom to Top,Original,Normal,False,675
+sample52,data/sample52/dicom/,357,414,Bottom to Top,Suspicious,High probability of error,False,570
+sample53,data/sample53/dicom/,436,558,Top to Bottom,Original,Normal,False,1005
+sample54,data/sample54/dicom/,511,606,Top to Bottom,Original,Normal,False,975
+sample55,data/sample55/dicom/,527,607,Top to Bottom,Original,Normal,False,750
+sample56,data/sample56/dicom/,519,614,Top to Bottom,Original,Normal,False,1005
+sample57,data/sample57/dicom/,477,584,Bottom to Top,Original,Normal,False,960
+sample59,data/sample59/dicom/,319,430,Bottom to Top,Suspicious,High probability of error,False,529
+sample60,data/sample60/dicom/,358,631,Top to Bottom,Original,Tilted right,False,1005
+sample61,data/sample61/dicom/,509,609,Bottom to Top,Suspicious,High probability of error,False,837
+sample66,data/sample66/dicom/,,,Bottom to Top,Error,Tilted right; Slice number mismatch,True,500
+sample67,data/sample67/dicom/,309,364,Bottom to Top,Suspicious,Tilted left; High probability of error,False,480
+sample68,data/sample68/dicom/,,,Bottom to Top,Error,Slice number mismatch,True,499
