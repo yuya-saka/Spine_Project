@@ -23,7 +23,7 @@ from sklearn.metrics import (
 )
 
 from model import CNN_LSTM_Fracture
-from dataset import PatientSplitter, SpineSequenceDataset, get_train_transforms
+from dataset import PatientSplitter, SpineSequenceDataset, get_train_transforms, get_val_transforms
 
 
 def compute_metrics(y_true, y_pred_proba):
@@ -187,10 +187,13 @@ def main(cfg: DictConfig):
             transform=train_transform,
             sequence_length=cfg.data.sequence_length
         )
+        
+        val_transform = get_val_transforms(cfg) if cfg.augmentation.enabled else None
+        
         val_dataset = SpineSequenceDataset(
             val_df,
             data_dir=data_dir_abs,
-            transform=None,
+            transform=val_transform,
             sequence_length=cfg.data.sequence_length
         )
 

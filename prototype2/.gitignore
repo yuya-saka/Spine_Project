@@ -1,0 +1,26 @@
+# Checkpoints
+checkpoints/
+*.pth
+
+# Hydra outputs
+outputs/
+multirun/
+
+# wandb
+wandb/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Jupyter
+.ipynb_checkpoints
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

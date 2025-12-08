@@ -132,14 +132,18 @@ class SpineSequenceDataset(Dataset):
 
         # データ拡張 (15枚すべてに同じ変換を適用)
         if self.transform:
-            transformed_slices = []
-            for i in range(window.shape[0]):
-                # (3, 128, 128) -> (128, 128, 3)
-                slice_img = window[i].transpose(1, 2, 0)
-                transformed = self.transform(image=slice_img)
-                # (128, 128, 3) -> (3, 128, 128)
-                transformed_slices.append(transformed['image'].transpose(2, 0, 1))
-            window = np.stack(transformed_slices, axis=0)  # (15, 3, 128, 128)
+            T, C, H, W = window.shape
+            
+            # 1. (T, C, H, W) -> (H, W, T*C) に変形
+            # これで全スライスの全チャンネルを「深さ方向」に結合します
+            combined_img = window.transpose(2, 3, 0, 1).reshape(H, W, T * C)
+            
+            # 2. 一括で変換 (全スライスに対して同じ回転角度が適用されます)
+            transformed = self.transform(image=combined_img)
+            combined_img = transformed['image'] # (H, W, T*C)
+
+            # 3. 元の形状に戻す
+            window = combined_img.reshape(H, W, T, C).transpose(2, 3, 0, 1)
 
         return torch.from_numpy(window), torch.tensor(center_label, dtype=torch.float32)
 
@@ -153,5 +157,20 @@ def get_train_transforms(cfg):
             brightness_limit=0.1,
             contrast_limit=0.1,
             p=cfg.augmentation.brightness_contrast_p
-        )
+        ),
+        A.Normalize(
+            mean=[0.485, 0.456, 0.406], # ImageNetの平均
+            std=[0.229, 0.224, 0.225],  # ImageNetの標準偏差
+            max_pixel_value=1.0         # 入力がすでに0-1なので 1.0 に設定
+        ),
+    ])
+
+# Val/Test用にも Normalize だけは適用します
+def get_val_transforms(cfg):
+    return A.Compose([
+        A.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225],
+            max_pixel_value=1.0
+        ),
     ])
