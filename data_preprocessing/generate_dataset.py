@@ -18,7 +18,7 @@ LABEL_DIR = os.path.join(PROJECT_ROOT, "fracture_labels")   # 骨折ラベル
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "spine_data")       # 出力先
 
 # 出力ボリュームサイズ (ボクセル数)
-# AIモデルの入力サイズに合わせて固定
+# AIモデルの入力サイズ (X, Y, Z)
 OUTPUT_SHAPE = (128, 128, 64) 
 OUTPUT_CENTER = np.array([OUTPUT_SHAPE[0]/2, OUTPUT_SHAPE[1]/2, OUTPUT_SHAPE[2]/2])
 
@@ -31,15 +31,15 @@ SOFT_WL, SOFT_WW = 40, 400
 # 骨折判定の閾値
 FRACTURE_OVERLAP_THRESHOLD = 0.10
 
-# ★重要★ マージン率
-# 椎骨サイズの何倍の範囲を切り出すか。
-# 2.5倍に設定することで、ターゲット椎骨は画像の約40%を占め、
-# 残りのスペースに「上下の椎間板」や「隣接椎骨」が十分に含まれます。
-ROI_MARGIN_RATIO = 2.5
+# ★重要★ 切り出し範囲のマージン設定
+# XY (断面): 1.2倍 -> 椎体ギリギリにズームし、余計な背景をカット
+ROI_MARGIN_XY = 1.2 
+# Z  (高さ): 3.0倍 -> 上下の椎間板・隣接骨を含めるため広く取る (隙間防止)
+ROI_MARGIN_Z = 3.0
 
 
 class SpineDatasetGenerator:
-    """頸椎データセット生成クラス (サイズ正規化・コンテキスト保持版)"""
+    """頸椎データセット生成クラス (異方性FOV・コンテキスト保持版)"""
 
     def __init__(self, csv_file, nifti_dir, seg_dir, label_dir, output_dir):
         self.csv_file = csv_file
@@ -146,44 +146,53 @@ class SpineDatasetGenerator:
 
     def _calculate_roi_scale(self, mask_img, mask_data, R_phys, target_shape):
         """
-        ★重要変更★
-        椎骨の物理サイズに基づいてスケールを決定し、体格差を正規化する。
-        さらに、マージンを大きく取ることで周辺（椎間板等）を含める。
+        ★修正ポイント★
+        XY平面とZ軸で異なる倍率を適用し、
+        「横はタイトに椎体のみ」「縦はワイドに椎体間を含む」ように計算する。
         """
         indices = np.argwhere(mask_data > 0)
         if len(indices) == 0:
             return np.ones(3)
 
-        # 画像座標 -> 物理座標(mm)
+        # 1. 画像座標 -> 物理座標(mm)
         N = len(indices)
         indices_homo = np.hstack([indices, np.ones((N, 1))])
         coords_phys = (mask_img.affine @ indices_homo.T).T[:, :3]
 
-        # 重心移動
+        # 2. 重心移動 & 回転 (Spine Aligned)
         centroid = np.mean(coords_phys, axis=0)
         coords_centered = coords_phys - centroid
-
-        # 回転行列適用 (Spine Aligned Coordinates)
         coords_rotated = coords_centered @ R_phys 
 
-        # 椎骨そのもののバウンディングボックスサイズ (mm)
+        # 3. 椎骨の物理サイズ (mm) を取得
+        # axis 0: X, axis 1: Y, axis 2: Z (Spine Aligned Space)
         min_coords = np.min(coords_rotated, axis=0)
         max_coords = np.max(coords_rotated, axis=0)
         vertebra_size_mm = max_coords - min_coords
 
-        # ROIサイズ決定: 椎骨サイズの 2.5倍 を確保
-        target_roi_size_mm = vertebra_size_mm * ROI_MARGIN_RATIO
+        # 4. ターゲットFOV (Field of View) の計算
+        # XY平面: 1.2倍 (タイト)
+        fov_x = vertebra_size_mm[0] * ROI_MARGIN_XY
+        fov_y = vertebra_size_mm[1] * ROI_MARGIN_XY
+        # Z軸: 3.0倍 (ワイド)
+        fov_z = vertebra_size_mm[2] * ROI_MARGIN_Z
 
-        # 安全策: 極端な値のクリッピング
-        target_roi_size_mm = np.clip(target_roi_size_mm, a_min=40.0, a_max=300.0)
+        # 安全策: 異常値クリップ (mm)
+        fov_x = np.clip(fov_x, 15.0, 120.0)
+        fov_y = np.clip(fov_y, 15.0, 120.0)
+        fov_z = np.clip(fov_z, 30.0, 200.0)
 
-        # スケール計算: (ROIサイズ mm) / (出力ボクセル数 px)
-        # これにより「1ボクセルが何mmか」が決まる（ズーム率）
-        scale_mm_per_voxel = target_roi_size_mm / np.array(target_shape)
+        # 5. スケール計算 (FOV mm / Output Pixels) = mm/voxel
+        scale_x = fov_x / target_shape[0]
+        scale_y = fov_y / target_shape[1]
+        scale_z = fov_z / target_shape[2]
 
-        # アスペクト比維持: 最大のスケールに合わせて全軸等方化
-        max_scale = np.max(scale_mm_per_voxel)
-        scale_factors = np.array([max_scale, max_scale, max_scale])
+        # 6. アスペクト比調整
+        # XY平面内は正方形を維持する (円が楕円にならないように)
+        scale_xy = max(scale_x, scale_y)
+        
+        # 結果: [Scale_XY, Scale_XY, Scale_Z]
+        scale_factors = np.array([scale_xy, scale_xy, scale_z])
 
         return scale_factors
 
@@ -219,7 +228,7 @@ class SpineDatasetGenerator:
     def _extract_volume_channels(self, ct_data, mask_data, M_total):
         """
         ボリューム切り出し (3チャンネル)
-        ★重要変更★ 背景マスキングを削除し、コンテキストを保持
+        ★修正ポイント★ 背景マスキング(dilate & multiply)を削除。
         """
         matrix = M_total[:3, :3]
         offset = M_total[:3, 3]
@@ -235,20 +244,14 @@ class SpineDatasetGenerator:
         soft_raw = affine_transform(ct_data, matrix, offset=offset, output_shape=out_shape, order=1, cval=-1024)
         volume[1] = self._apply_windowing(soft_raw, SOFT_WL, SOFT_WW)
 
-        # Ch 2: Mask (ターゲット椎骨のみ) - AIに「どこを見るべきか」を教える用
+        # Ch 2: Mask (ターゲット椎骨のみ) - AIの学習ターゲット用
         mask_resampled = affine_transform(mask_data, matrix, offset=offset, output_shape=out_shape, order=0, cval=0)
         volume[2] = (mask_resampled > 0.5).astype(np.float32)
-
-        # ※以前あった `volume *= mask` は削除済み。これにより背景は黒くなりません。
 
         return volume
 
     def _determine_fracture_label(self, vertebra_mask, fracture_label_map):
-        """
-        骨折判定
-        ユーザー要件: 骨折マスクはスライス全体にある可能性があるため、
-        「ターゲット椎骨の領域内」に骨折ラベルが含まれるかを確認する。
-        """
+        """骨折判定 (椎骨領域内の重なり率)"""
         vertebra_voxels = np.sum(vertebra_mask > 0)
         if vertebra_voxels == 0: return 0, 0.0
 
@@ -286,7 +289,7 @@ class SpineDatasetGenerator:
                 mask_img, mask_data_full = self._load_vertebra_mask(sample_id, vid)
                 mask_data = self._get_largest_component(mask_data_full)
 
-                # 3. スケール計算 (正規化 + 広範囲確保)
+                # 3. スケール計算 (XYタイト・Zワイド)
                 scale_factors = self._calculate_roi_scale(mask_img, mask_data, R_phys, OUTPUT_SHAPE)
                 
                 # 4. 変換行列
@@ -314,12 +317,13 @@ class SpineDatasetGenerator:
                     'vertebra': vid,
                     'fracture_label': int(is_frac),
                     'overlap': float(overlap_ratio),
-                    'scale_mm': float(scale_factors[0]),
+                    'scale_xy': float(scale_factors[0]),
+                    'scale_z': float(scale_factors[2]),
                     'file_path': f"{sample_id}/{vid}.npy"
                 })
                 
                 status = "FRACTURE" if is_frac else "Normal"
-                print(f"  {vid}: {status} (Scale: {scale_factors[0]:.2f} mm/pix)")
+                print(f"  {vid}: {status} (Scale XY: {scale_factors[0]:.2f}, Z: {scale_factors[2]:.2f})")
 
         except Exception as e:
             print(f"Error processing {sample_id}: {e}")
