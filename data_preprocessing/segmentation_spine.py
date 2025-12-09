@@ -5,10 +5,14 @@ import traceback
 from totalsegmentator.python_api import totalsegmentator
 
 # --- 設定 ---
+# スクリプトの場所からプロジェクトルートを特定（実行場所に依存しない）
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+
 GPU_ID = 1                           # 使用するGPU番号 (0, 1, 2)
-CSV_FILE = "nifti_list.csv"      # 転送したCSV
-NIFTI_DIR = "./nifti_output"           # 転送したNIfTIフォルダ
-OUTPUT_DIR = "./segmentations"      # セグメンテーション結果の保存先
+CSV_FILE = os.path.join(PROJECT_ROOT, "nifti_list.csv")      # 転送したCSV
+NIFTI_DIR = os.path.join(PROJECT_ROOT, "nifti_output")           # 転送したNIfTIフォルダ
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, "segmentations")      # セグメンテーション結果の保存先
 
 # GPU設定（環境変数で上書き可能）
 if "CUDA_VISIBLE_DEVICES" not in os.environ:

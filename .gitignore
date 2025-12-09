@@ -16,6 +16,7 @@ nifti_out_past/
 segmentations/
 segmentations_past/
 fracture_labels/
+fracture_labels_past/
 spine_data/
 spine_data_exp/
 debugs/

@@ -7,15 +7,20 @@ from scipy.spatial.transform import Rotation
 import traceback
 
 # --- 設定 ---
-CSV_FILE = "nifti_list.csv"       # 入力CSV
-NIFTI_DIR = "./nifti_output"      # CT画像 (nii.gz)
-SEG_DIR = "./segmentations"       # 椎骨セグメンテーション (nii.gz)
-LABEL_DIR = "./fracture_labels"   # 骨折ラベル (スライス全体マスク nii.gz)
-OUTPUT_DIR = "./spine_data"   # 出力先
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 
-# 出力サイズ (X, Y, Z) mm
-CROP_SIZE_MM = (128, 128, 64)
-BOX_CENTER_MM = np.array([CROP_SIZE_MM[0]/2, CROP_SIZE_MM[1]/2, CROP_SIZE_MM[2]/2])
+# パス設定
+CSV_FILE = os.path.join(PROJECT_ROOT, "nifti_list.csv")       # IDリスト
+NIFTI_DIR = os.path.join(PROJECT_ROOT, "nifti_output")      # CT画像
+SEG_DIR = os.path.join(PROJECT_ROOT, "segmentations")       # 椎骨セグメンテーション
+LABEL_DIR = os.path.join(PROJECT_ROOT, "fracture_labels")   # 骨折ラベル
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, "spine_data")       # 出力先
+
+# 出力ボリュームサイズ (ボクセル数)
+# AIモデルの入力サイズに合わせて固定
+OUTPUT_SHAPE = (128, 128, 64) 
+OUTPUT_CENTER = np.array([OUTPUT_SHAPE[0]/2, OUTPUT_SHAPE[1]/2, OUTPUT_SHAPE[2]/2])
 
 VERTEBRAE = ["C1", "C2", "C3", "C4", "C5", "C6", "C7"]
 
@@ -23,12 +28,18 @@ VERTEBRAE = ["C1", "C2", "C3", "C4", "C5", "C6", "C7"]
 BONE_WL, BONE_WW = 1000, 4000
 SOFT_WL, SOFT_WW = 40, 400
 
-# 骨折判定の閾値 (椎骨体積の何%が骨折スライスに含まれるか)
+# 骨折判定の閾値
 FRACTURE_OVERLAP_THRESHOLD = 0.10
+
+# ★重要★ マージン率
+# 椎骨サイズの何倍の範囲を切り出すか。
+# 2.5倍に設定することで、ターゲット椎骨は画像の約40%を占め、
+# 残りのスペースに「上下の椎間板」や「隣接椎骨」が十分に含まれます。
+ROI_MARGIN_RATIO = 2.5
 
 
 class SpineDatasetGenerator:
-    """頸椎データセット生成クラス (可視化NIfTI出力付き)"""
+    """頸椎データセット生成クラス (サイズ正規化・コンテキスト保持版)"""
 
     def __init__(self, csv_file, nifti_dir, seg_dir, label_dir, output_dir):
         self.csv_file = csv_file
@@ -48,7 +59,6 @@ class SpineDatasetGenerator:
         ct_img = nib.load(ct_path)
         ct_data = ct_img.get_fdata()
 
-        # 骨折ラベル (回転させず、重なり判定用に使用)
         fracture_path = os.path.join(self.label_dir, f"{sample_id}.nii.gz")
         if os.path.exists(fracture_path):
             fracture_img = nib.load(fracture_path)
@@ -69,7 +79,7 @@ class SpineDatasetGenerator:
         return mask_img, mask_data
 
     def _get_largest_component(self, mask_data):
-        """マスクの最大連結成分のみを抽出"""
+        """マスクの最大連結成分のみを抽出 (ノイズ除去)"""
         labeled, num_components = nd_label(mask_data > 0)
         if num_components <= 1:
             return mask_data
@@ -122,7 +132,7 @@ class SpineDatasetGenerator:
         return vec / norm if norm > 1e-6 else None
 
     def _compute_rotation_matrix(self, vertebra_id, centroids):
-        """回転行列計算"""
+        """回転行列計算 (Z軸を脊椎方向に合わせる)"""
         if vertebra_id in ["C1", "C2"]:
             if centroids.get("C3") is not None:
                 return self._compute_rotation_matrix("C3", centroids)
@@ -134,45 +144,111 @@ class SpineDatasetGenerator:
         rotation, _ = Rotation.align_vectors([target_vec], [spine_vec])
         return rotation.as_matrix()
 
-    def _build_resampling_matrix(self, centroid_phys, R_phys, src_affine):
-        """変換行列構築"""
+    def _calculate_roi_scale(self, mask_img, mask_data, R_phys, target_shape):
+        """
+        ★重要変更★
+        椎骨の物理サイズに基づいてスケールを決定し、体格差を正規化する。
+        さらに、マージンを大きく取ることで周辺（椎間板等）を含める。
+        """
+        indices = np.argwhere(mask_data > 0)
+        if len(indices) == 0:
+            return np.ones(3)
+
+        # 画像座標 -> 物理座標(mm)
+        N = len(indices)
+        indices_homo = np.hstack([indices, np.ones((N, 1))])
+        coords_phys = (mask_img.affine @ indices_homo.T).T[:, :3]
+
+        # 重心移動
+        centroid = np.mean(coords_phys, axis=0)
+        coords_centered = coords_phys - centroid
+
+        # 回転行列適用 (Spine Aligned Coordinates)
+        coords_rotated = coords_centered @ R_phys 
+
+        # 椎骨そのもののバウンディングボックスサイズ (mm)
+        min_coords = np.min(coords_rotated, axis=0)
+        max_coords = np.max(coords_rotated, axis=0)
+        vertebra_size_mm = max_coords - min_coords
+
+        # ROIサイズ決定: 椎骨サイズの 2.5倍 を確保
+        target_roi_size_mm = vertebra_size_mm * ROI_MARGIN_RATIO
+
+        # 安全策: 極端な値のクリッピング
+        target_roi_size_mm = np.clip(target_roi_size_mm, a_min=40.0, a_max=300.0)
+
+        # スケール計算: (ROIサイズ mm) / (出力ボクセル数 px)
+        # これにより「1ボクセルが何mmか」が決まる（ズーム率）
+        scale_mm_per_voxel = target_roi_size_mm / np.array(target_shape)
+
+        # アスペクト比維持: 最大のスケールに合わせて全軸等方化
+        max_scale = np.max(scale_mm_per_voxel)
+        scale_factors = np.array([max_scale, max_scale, max_scale])
+
+        return scale_factors
+
+    def _build_resampling_matrix(self, centroid_phys, R_phys, src_affine, scale_factors):
+        """変換行列構築 (回転 + 重心移動 + スケーリング)"""
+        # 1. Output Center -> Origin
         T_center = np.eye(4)
-        T_center[:3, 3] = -BOX_CENTER_MM
+        T_center[:3, 3] = -OUTPUT_CENTER
+
+        # 2. Scaling (mm/pixel)
+        S = np.eye(4)
+        S[0,0] = scale_factors[0]
+        S[1,1] = scale_factors[1]
+        S[2,2] = scale_factors[2]
+
+        # 3. Rotation
         R_inv = np.eye(4)
         R_inv[:3, :3] = R_phys.T 
+
+        # 4. Translation
         T_loc = np.eye(4)
         T_loc[:3, 3] = centroid_phys
+
+        # 5. To Image Index
         src_affine_inv = np.linalg.inv(src_affine)
-        return src_affine_inv @ T_loc @ R_inv @ T_center
+
+        return src_affine_inv @ T_loc @ R_inv @ S @ T_center
 
     def _apply_windowing(self, data, wl, ww):
         lower, upper = wl - ww/2, wl + ww/2
         return np.clip((data - lower) / (upper - lower), 0, 1).astype(np.float32)
 
     def _extract_volume_channels(self, ct_data, mask_data, M_total):
-        """ボリューム切り出し (3チャンネル)"""
+        """
+        ボリューム切り出し (3チャンネル)
+        ★重要変更★ 背景マスキングを削除し、コンテキストを保持
+        """
         matrix = M_total[:3, :3]
         offset = M_total[:3, 3]
-        out_shape = CROP_SIZE_MM
+        out_shape = OUTPUT_SHAPE
 
         volume = np.zeros((3, *out_shape), dtype=np.float32)
 
-        # Ch 0: Bone
+        # Ch 0: Bone (骨条件) - 椎間板や隣接骨もそのまま残る
         bone_raw = affine_transform(ct_data, matrix, offset=offset, output_shape=out_shape, order=1, cval=-1024)
         volume[0] = self._apply_windowing(bone_raw, BONE_WL, BONE_WW)
 
-        # Ch 1: Soft
+        # Ch 1: Soft (軟部組織条件) - 椎間板や脊髄も見える
         soft_raw = affine_transform(ct_data, matrix, offset=offset, output_shape=out_shape, order=1, cval=-1024)
         volume[1] = self._apply_windowing(soft_raw, SOFT_WL, SOFT_WW)
 
-        # Ch 2: Mask (Vertebra)
+        # Ch 2: Mask (ターゲット椎骨のみ) - AIに「どこを見るべきか」を教える用
         mask_resampled = affine_transform(mask_data, matrix, offset=offset, output_shape=out_shape, order=0, cval=0)
         volume[2] = (mask_resampled > 0.5).astype(np.float32)
+
+        # ※以前あった `volume *= mask` は削除済み。これにより背景は黒くなりません。
 
         return volume
 
     def _determine_fracture_label(self, vertebra_mask, fracture_label_map):
-        """骨折判定 (元画像空間での重なり率)"""
+        """
+        骨折判定
+        ユーザー要件: 骨折マスクはスライス全体にある可能性があるため、
+        「ターゲット椎骨の領域内」に骨折ラベルが含まれるかを確認する。
+        """
         vertebra_voxels = np.sum(vertebra_mask > 0)
         if vertebra_voxels == 0: return 0, 0.0
 
@@ -184,26 +260,12 @@ class SpineDatasetGenerator:
         return is_fracture, overlap_ratio
 
     def _save_debug_nifti(self, save_dir, vertebra_id, volume):
-        """
-        確認用のNIfTIファイルを保存
-        Args:
-            volume: (3, X, Y, Z) の配列。transpose前のもの。
-        """
-        # Affineは単位行列（1mm等方、正規化済みのため）
+        """確認用保存"""
         affine = np.eye(4)
-
-        # Channel 0: Bone Window
-        # shapeは (X, Y, Z) である必要があるため、volume[0]をそのまま渡す
-        nib.save(
-            nib.Nifti1Image(volume[0], affine),
-            os.path.join(save_dir, f"{vertebra_id}_bone.nii.gz")
-        )
-
-        # Channel 2: Mask
-        nib.save(
-            nib.Nifti1Image(volume[2], affine),
-            os.path.join(save_dir, f"{vertebra_id}_mask.nii.gz")
-        )
+        # Bone
+        nib.save(nib.Nifti1Image(volume[0], affine), os.path.join(save_dir, f"{vertebra_id}_bone.nii.gz"))
+        # Mask
+        nib.save(nib.Nifti1Image(volume[2], affine), os.path.join(save_dir, f"{vertebra_id}_mask.nii.gz"))
 
     def process_sample(self, sample_id):
         print(f"Processing ID: {sample_id} ...")
@@ -216,41 +278,48 @@ class SpineDatasetGenerator:
             for vid in VERTEBRAE:
                 if centroids_mm.get(vid) is None: continue
 
-                # 1. 切り出し処理
+                # 1. アライメント (回転)
                 R_phys = self._compute_rotation_matrix(vid, centroids_mm)
                 if R_phys is None: continue
 
-                M_total = self._build_resampling_matrix(centroids_mm[vid], R_phys, ct_img.affine)
-                _, mask_data = self._load_vertebra_mask(sample_id, vid)
-                mask_data = self._get_largest_component(mask_data)
+                # 2. マスク
+                mask_img, mask_data_full = self._load_vertebra_mask(sample_id, vid)
+                mask_data = self._get_largest_component(mask_data_full)
 
-                # volume shape: (Channel, X, Y, Z)
+                # 3. スケール計算 (正規化 + 広範囲確保)
+                scale_factors = self._calculate_roi_scale(mask_img, mask_data, R_phys, OUTPUT_SHAPE)
+                
+                # 4. 変換行列
+                M_total = self._build_resampling_matrix(centroids_mm[vid], R_phys, ct_img.affine, scale_factors)
+
+                # 5. ボリューム抽出 (背景保持)
                 volume = self._extract_volume_channels(ct_data, mask_data, M_total)
 
-                # 2. 骨折判定
+                # 6. ラベル判定
                 is_frac, overlap_ratio = self._determine_fracture_label(mask_data, fracture_data)
 
-                # 3. 保存
+                # 7. 保存
                 save_dir = os.path.join(self.output_dir, sample_id)
                 os.makedirs(save_dir, exist_ok=True)
 
-                # AI学習用 .npy (Channel, Depth, Height, Width) に変換
+                # PyTorch用 (C, Z, Y, X)
                 volume_zyx = np.transpose(volume, (0, 3, 2, 1))
                 np.save(os.path.join(save_dir, f"{vid}.npy"), volume_zyx)
 
-                # 【追加】 可視化用 .nii.gz (Channel, X, Y, Z) のまま保存
+                # 確認用
                 self._save_debug_nifti(save_dir, vid, volume)
 
                 metadata_list.append({
                     'sample_id': sample_id,
                     'vertebra': vid,
                     'fracture_label': int(is_frac),
-                    'fracture_overlap_ratio': float(overlap_ratio),
+                    'overlap': float(overlap_ratio),
+                    'scale_mm': float(scale_factors[0]),
                     'file_path': f"{sample_id}/{vid}.npy"
                 })
                 
                 status = "FRACTURE" if is_frac else "Normal"
-                print(f"  {vid}: {status} (Overlap: {overlap_ratio:.1%})")
+                print(f"  {vid}: {status} (Scale: {scale_factors[0]:.2f} mm/pix)")
 
         except Exception as e:
             print(f"Error processing {sample_id}: {e}")

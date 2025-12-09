@@ -38,10 +38,46 @@ def mil_loss(logits, bag_labels, k=3):
     
     return loss
 
-def train_epoch(model, dataloader, optimizer, device, k, use_amp=True):
+# --- 追加: Center Loss関数 ---
+def center_loss(probs, bag_labels):
+    """
+    Center Loss (論文式(2)準拠)
+    正常スキャン(bag_label=0)の予測スコアを、そのスキャン内の平均値(center)に近づける。
+    これにより、正常データのばらつき(分散)を抑制し、過学習を防ぐ。
+    
+    Args:
+        probs: (B, T) - Sigmoid後の確率値
+        bag_labels: (B,) - 0 or 1
+    """
+    # 正常スキャン(label=0)のインデックスを取得
+    normal_indices = (bag_labels == 0).nonzero(as_tuple=True)[0]
+    
+    # バッチ内に正常データがない場合はLoss 0
+    if len(normal_indices) == 0:
+        return torch.tensor(0.0, device=probs.device, requires_grad=True)
+    
+    # 正常データの予測値: (N_normal, T)
+    normal_probs = probs[normal_indices]
+    
+    # 各スキャンごとの中心(平均)を計算: (N_normal, 1)
+    centers = normal_probs.mean(dim=1, keepdim=True)
+    
+    # 各要素とCenterの距離(L2ノルムの二乗)を計算
+    # 論文: || s_ij - c_i ||
+    loss = torch.mean((normal_probs - centers) ** 2)
+    
+    return loss
+
+
+def train_epoch(model, dataloader, optimizer, device, cfg, use_amp=True):
     model.train()
     total_loss = 0
-    scaler = torch.cuda.amp.GradScaler() if use_amp else None
+    scaler = torch.cuda.amp.GradScaler() if use_amp else None # Warningが出る場合は torch.amp.GradScaler('cuda', ...)
+
+    # cfgからパラメータ取得
+    k = cfg.mil.k
+    lambda_dmil = cfg.mil.lambda_dmil
+    lambda_c = cfg.mil.lambda_c
 
     for sequences, bag_labels in tqdm(dataloader, desc="Training"):
         sequences = sequences.to(device)
@@ -49,16 +85,33 @@ def train_epoch(model, dataloader, optimizer, device, k, use_amp=True):
 
         optimizer.zero_grad()
 
+        # Forward & Loss計算
         if use_amp:
             with torch.cuda.amp.autocast():
                 logits = model(sequences) # (B, T)
-                loss = mil_loss(logits, bag_labels, k=k)
+                probs = torch.sigmoid(logits) # Center Loss用に確率化
+                
+                # 1. DMIL Loss (異常検知) - Logitsを使用
+                l_dmil = mil_loss(logits, bag_labels, k=k)
+                
+                # 2. Center Loss (過学習抑制) - Probsを使用
+                l_c = center_loss(probs, bag_labels)
+                
+                # 合計Loss
+                loss = (lambda_dmil * l_dmil) + (lambda_c * l_c)
+
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
         else:
             logits = model(sequences)
-            loss = mil_loss(logits, bag_labels, k=k)
+            probs = torch.sigmoid(logits)
+            
+            l_dmil = mil_loss(logits, bag_labels, k=k)
+            l_c = center_loss(probs, bag_labels)
+            
+            loss = (lambda_dmil * l_dmil) + (lambda_c * l_c)
+            
             loss.backward()
             optimizer.step()
 
@@ -162,7 +215,7 @@ def main(cfg: DictConfig):
     for epoch in range(cfg.train.epochs):
         print(f"Epoch {epoch+1}/{cfg.train.epochs}")
         
-        train_loss = train_epoch(model, train_loader, optimizer, device, k=cfg.mil.k, use_amp=cfg.train.use_amp)
+        train_loss = train_epoch(model, train_loader, optimizer, device, cfg, use_amp=cfg.train.use_amp)
         val_loss, val_auc, val_pr_auc = validate_epoch(model, val_loader, device, k=cfg.mil.k)
         
         print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Val AUC: {val_auc:.4f}")

@@ -5,7 +5,7 @@ sample3,data/sample3/dicom/,440.0,569.0,Bottom to Top,Original,Tilted right,Fals
 sample4,data/sample4/dicom/,476.0,507.0,Bottom to Top,Original,Normal,False,780.0,476.0,507.0,False
 sample5,data/sample5/dicom/,471.0,512.0,Bottom to Top,Suspicious,Tilted right; High probability of error,False,705.0,471.0,512.0,False
 sample6,data/sample6/dicom/,,,Unknown,,Normal (No fracture),True,,,,False
-sample7,data/sample7/dicom/,464.0,557.0,Top to Bottom,Original,Includes second range 642-721,False,1012.0,454.0,547.0,True
+sample7,data/sample7/dicom/,464.0/642.0,557.0/721.0,Top to Bottom,Original,Includes second range 642-721,False,1012.0,290.0/454.0,369.0/547.0,True
 sample9,data/sample9/dicom/,,,Bottom to Top,Mismatch,Slice count mismatch,True,,,,False
 sample10,data/sample10/dicom/,622.0,689.0,Top to Bottom,Original,Normal,False,950.0,260.0,327.0,True
 sample12,data/sample12/dicom/,642.0,714.0,Top to Bottom,Original,Tilted right but vertebrae okay,False,912.0,197.0,269.0,True
@@ -27,7 +27,7 @@ sample32,data/sample32/dicom/,231.0,435.0,Bottom to Top,Suspicious,High probabil
 sample33,data/sample33/dicom/,,,Bottom to Top,Error,Too hard to see; High probability of error,True,650.0,,,False
 sample34,data/sample34/dicom/,,,Bottom to Top,Error,No slice numbers,True,802.0,,,False
 sample35,data/sample35/dicom/,268.0,330.0,Bottom to Top,Original,Tilted right but vertebrae okay,False,937.0,268.0,330.0,False
-sample36,data/sample36/dicom/,936/1030,965/1086,Bottom to Top,Suspicious,Tilted left; High probability of error; Multiple ranges,False,1287.0,936/1030,965/1086,False
+sample36,data/sample36/dicom/,936.0/1030,965.0/1086,Bottom to Top,Suspicious,Tilted left; High probability of error; Multiple ranges,False,1287.0,936/1030,965/1086,False
 sample37,data/sample37/dicom/,260.0,405.0,Bottom to Top,Suspicious,Tilted right; High probability of error,False,1057.0,260.0,405.0,False
 sample38,data/sample38/dicom/,455.0,533.0,Bottom to Top,Suspicious,High probability of error,False,885.0,455.0,533.0,False
 sample41,data/sample41/dicom/,203.0,289.0,Bottom to Top,Suspicious,High probability of error,False,887.0,203.0,289.0,False
